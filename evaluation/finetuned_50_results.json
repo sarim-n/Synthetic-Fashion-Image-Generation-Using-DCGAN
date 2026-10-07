@@ -1,0 +1,27 @@
+{
+  "device": "cuda",
+  "batch_size": 128,
+  "epochs": 50,
+  "total_training_duration_seconds": 981.83,
+  "inference": {
+    "total_time_seconds": 0.050236,
+    "per_image_latency_ms": 0.0392,
+    "images_per_second": 25479.58
+  },
+  "discriminator": {
+    "average_real_prediction": 0.6707,
+    "min_real_prediction": 0.0976,
+    "max_real_prediction": 0.9748,
+    "average_fake_prediction": 0.3685,
+    "min_fake_prediction": 0.0257,
+    "max_fake_prediction": 0.8993,
+    "real_accuracy": 78.91,
+    "fake_accuracy": 71.09,
+    "overall_accuracy": 75.0
+  },
+  "diversity": {
+    "metric": "Mean Pairwise L1 Pixel Distance",
+    "value": 0.5529,
+    "interpretation": "Rich intra-batch pixel variation indicating healthy sample diversity without mode collapse."
+  }
+}

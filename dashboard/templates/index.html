@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Synthetic Fashion Generation using DCGAN — Interactive Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+    <!-- Header Section -->
+    <header>
+        <div class="header-title-container">
+            <div>
+                <h1>Synthetic Fashion Generation using DCGAN</h1>
+                <p>Generating synthetic Fashion-MNIST images with Deep Convolutional GANs</p>
+            </div>
+            <div class="badge-container">
+                <span class="badge badge-cuda">🟢 {{ gpu_name }}</span>
+                <span class="badge" style="background-color: #312e81; color: #c7d2fe; border-color: #4338ca;">Final Model: 50-Epoch DCGAN</span>
+                <span class="badge">PyTorch 2.5.1+cu121</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Top Metric Cards -->
+    <section class="metrics-grid">
+        <div class="metric-card">
+            <div class="label">Training Epochs</div>
+            <div class="value">{{ metrics.epochs }}</div>
+            <div class="subtext">Validated Final Model</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Dataset</div>
+            <div class="value">Fashion-MNIST</div>
+            <div class="subtext">60,000 Grayscale (28x28)</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Batch Size</div>
+            <div class="value">{{ metrics.batch_size }}</div>
+            <div class="subtext">Samples per Iteration</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Compute Target</div>
+            <div class="value">{{ metrics.device.upper() }}</div>
+            <div class="subtext">NVIDIA RTX 2050</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Average D(real)</div>
+            <div class="value">{{ metrics.discriminator.average_real_prediction }}</div>
+            <div class="subtext">Real Image Score</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Average D(fake)</div>
+            <div class="value">{{ metrics.discriminator.average_fake_prediction }}</div>
+            <div class="subtext">Fake Image Score</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Discriminator Acc</div>
+            <div class="value">{{ metrics.discriminator.overall_accuracy }}%</div>
+            <div class="subtext">Binary Real/Fake Accuracy</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Inference Latency</div>
+            <div class="value">{{ metrics.inference.per_image_latency_ms }} ms</div>
+            <div class="subtext">Per-Image Latency</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Throughput</div>
+            <div class="value">{{ "{:,}".format(metrics.inference.images_per_second|int) }}</div>
+            <div class="subtext">Images / Second</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Pixel Diversity</div>
+            <div class="value">{{ metrics.diversity.value }}</div>
+            <div class="subtext">Pairwise L1 Distance</div>
+        </div>
+    </section>
+
+    <!-- Main Content Container -->
+    <main>
+        
+        <!-- 1. Real-Time Generator Interaction -->
+        <section class="dashboard-section">
+            <div class="section-title">
+                <span>✨ Generate New Fashion</span>
+            </div>
+            <div class="section-desc">
+                Generate fresh synthetic fashion samples from random 100-dimensional Gaussian noise vectors in real-time using the 50-epoch Generator, and evaluate each sample individually through the Discriminator.
+            </div>
+
+            <div class="generator-control-bar">
+                <div>
+                    <strong>Final Model:</strong> 50-Epoch DCGAN (<code>checkpoints/finetuned_50/generator.pth</code>)
+                    <div id="status-text" style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.2rem;">
+                        Ready for real-time generation & individual Discriminator predictions.
+                    </div>
+                </div>
+                <button id="generate-btn" class="btn-primary" onclick="generateFashion()">
+                    ⚡ Generate Fashion
+                </button>
+            </div>
+
+            <!-- Composite Grid Image -->
+            <div class="image-display-container">
+                <img id="generated-grid-img" class="dashboard-img" src="/samples/finetuned_50/evaluation_generated.png" alt="Generated Fashion Grid">
+            </div>
+
+            <!-- Batch Prediction Summary Banner -->
+            <div id="predictions-summary-banner" class="prediction-summary-banner" style="display: none; margin-top: 1.5rem;">
+                <div class="summary-stat-item">
+                    <div class="stat-label">Predicted REAL</div>
+                    <div id="stat-real-count" class="stat-value" style="color: #6ee7b7;">0 / 16</div>
+                </div>
+                <div class="summary-stat-item">
+                    <div class="stat-label">Predicted FAKE</div>
+                    <div id="stat-fake-count" class="stat-value" style="color: #fca5a5;">0 / 16</div>
+                </div>
+                <div class="summary-stat-item">
+                    <div class="stat-label">Average Real Probability</div>
+                    <div id="stat-avg-prob" class="stat-value" style="color: #6366f1;">0.0%</div>
+                </div>
+            </div>
+
+            <!-- Individual Per-Image Predictions Grid -->
+            <div id="per-image-container" style="display: none; margin-top: 1.5rem;">
+                <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 1rem; color: var(--text-primary);">
+                    🔍 Individual Item Discriminator Predictions (16 Generated Samples)
+                </h3>
+                <div id="per-image-cards-grid" class="per-image-cards-grid">
+                    <!-- Dynamically populated by JavaScript -->
+                </div>
+            </div>
+        </section>
+
+        <!-- 2. Real vs Generated Comparison -->
+        <section class="dashboard-section">
+            <div class="section-title">
+                <span>⚖️ Real vs Generated Fashion</span>
+            </div>
+            <div class="section-desc">
+                Comparison between authentic Fashion-MNIST training ground truth and images synthesized by the validated 50-epoch DCGAN.
+            </div>
+            <div class="image-display-container">
+                <img class="dashboard-img" src="/samples/finetuned_50/real_vs_generated.png" alt="Real vs Generated Comparison">
+            </div>
+        </section>
+
+        <!-- 3. Unique Highlight: Generator Evolution -->
+        <section class="dashboard-section highlight-section">
+            <div class="section-title" style="color: #a5b4fc;">
+                <span>🚀 Generator Evolution During Training (50 Epochs)</span>
+            </div>
+            <div class="section-desc">
+                Using the exact same fixed latent noise inputs, this visualization shows how the Generator progressively learned Fashion-MNIST structures from Epoch 1 to Epoch 50.
+            </div>
+            <div class="image-display-container">
+                <img class="dashboard-img" src="/samples/finetuned_50/epoch_evolution.png" alt="Generator Evolution Across 50 Epochs">
+            </div>
+            <div class="evolution-explanation">
+                <strong>Progression Insight:</strong> Early epochs contain raw noisy patterns. As adversarial training progresses through 50 epochs, recognizable clothing structures (shirts, dresses, coats, sneakers, boots) emerge with enhanced spatial sharpness and line contours.
+            </div>
+        </section>
+
+        <!-- 4. Training Loss Curves -->
+        <section class="dashboard-section">
+            <div class="section-title">
+                <span>📈 GAN Training Loss (50 Epochs)</span>
+            </div>
+            <div class="section-desc">
+                Generator and Discriminator loss across 50 training epochs (Total Training Time: ~16.3 minutes on NVIDIA RTX 2050 GPU).
+            </div>
+            <div class="image-display-container">
+                <img class="dashboard-img" src="/samples/finetuned_50/training_loss_curves.png" alt="GAN Training Loss Curves">
+            </div>
+        </section>
+
+        <!-- 5. Discriminator & Performance Grid -->
+        <div class="split-grid">
+            <!-- Discriminator Results -->
+            <section class="dashboard-section" style="margin-bottom: 0;">
+                <div class="section-title">
+                    <span>🛡️ Discriminator Authenticity Analysis</span>
+                </div>
+                <div class="info-box">
+                    The Discriminator performs binary authenticity classification: <strong>1 = Real</strong> and <strong>0 = Fake</strong>. It is not a 10-class Fashion-MNIST object classifier.
+                </div>
+                <table class="stats-table">
+                    <tr>
+                        <th>Metric</th>
+                        <th>50-Epoch Final Value</th>
+                    </tr>
+                    <tr>
+                        <td>Average D(Real Images)</td>
+                        <td>{{ metrics.discriminator.average_real_prediction }}</td>
+                    </tr>
+                    <tr>
+                        <td>Average D(Fake Images)</td>
+                        <td>{{ metrics.discriminator.average_fake_prediction }}</td>
+                    </tr>
+                    <tr>
+                        <td>Real Image Classification Acc</td>
+                        <td>{{ metrics.discriminator.real_accuracy }}%</td>
+                    </tr>
+                    <tr>
+                        <td>Fake Image Classification Acc</td>
+                        <td>{{ metrics.discriminator.fake_accuracy }}%</td>
+                    </tr>
+                    <tr>
+                        <td>Overall Binary Accuracy</td>
+                        <td>{{ metrics.discriminator.overall_accuracy }}%</td>
+                    </tr>
+                </table>
+            </section>
+
+            <!-- Inference Performance -->
+            <section class="dashboard-section" style="margin-bottom: 0;">
+                <div class="section-title">
+                    <span>⚡ Inference Performance</span>
+                </div>
+                <div class="info-box">
+                    Latency was measured using batched inference with GPU synchronization and warm-up runs.
+                </div>
+                <table class="stats-table">
+                    <tr>
+                        <th>Parameter</th>
+                        <th>Measured Benchmark</th>
+                    </tr>
+                    <tr>
+                        <td>Evaluated Batch Size</td>
+                        <td>{{ metrics.batch_size }}</td>
+                    </tr>
+                    <tr>
+                        <td>Benchmark Duration (10x)</td>
+                        <td>{{ metrics.inference.total_time_seconds }} s</td>
+                    </tr>
+                    <tr>
+                        <td>Per-Image Latency</td>
+                        <td>{{ metrics.inference.per_image_latency_ms }} ms</td>
+                    </tr>
+                    <tr>
+                        <td>Throughput</td>
+                        <td>{{ "{:,}".format(metrics.inference.images_per_second|int) }} img/s</td>
+                    </tr>
+                    <tr>
+                        <td>Active Device</td>
+                        <td>{{ metrics.device.upper() }} (NVIDIA RTX 2050)</td>
+                    </tr>
+                </table>
+            </section>
+        </div>
+
+        <!-- 6. How DCGAN Works Interactive Visual Section -->
+        <section class="dashboard-section" id="how-dcgan-works">
+            <div class="section-title">
+                <span>🧠 How DCGAN Works</span>
+            </div>
+            <div class="section-desc">
+                Interactive step-by-step visual representation of the Deep Convolutional GAN training process. Walk through the complete adversarial pipeline from random latent noise to Generator synthesis, Discriminator evaluation, BCE loss computation, and parameter updates.
+            </div>
+
+            <!-- Interactive Stepper Controls -->
+            <div class="stepper-toolbar">
+                <button id="step-prev-btn" class="stepper-btn" onclick="prevStep()">← Previous Step</button>
+                <div class="step-indicators" id="step-indicators">
+                    <button class="step-pill active" onclick="jumpToStep(0)">
+                        <span class="step-num">1</span> Sample Noise
+                    </button>
+                    <button class="step-pill" onclick="jumpToStep(1)">
+                        <span class="step-num">2</span> Generator Creates Image
+                    </button>
+                    <button class="step-pill" onclick="jumpToStep(2)">
+                        <span class="step-num">3</span> Discriminator Judges
+                    </button>
+                    <button class="step-pill" onclick="jumpToStep(3)">
+                        <span class="step-num">4</span> Calculate Loss
+                    </button>
+                    <button class="step-pill" onclick="jumpToStep(4)">
+                        <span class="step-num">5</span> Update Weights
+                    </button>
+                </div>
+                <button id="step-next-btn" class="stepper-btn" onclick="nextStep()">Next Step →</button>
+            </div>
+
+            <!-- Current Stage Explanation Card -->
+            <div class="active-stage-card">
+                <div class="stage-card-header">
+                    <span class="stage-badge" id="stage-badge">Step 1 of 5</span>
+                    <h3 class="stage-title" id="stage-title">Sample Random Noise</h3>
+                </div>
+                <p class="stage-explanation" id="stage-explanation">
+                    A random 100-dimensional latent vector z is sampled.
+                </p>
+                <div class="stage-note" id="stage-note">
+                    <span class="stage-note-label">Architecture Context:</span>
+                    <span id="stage-note-text">Each generated image starts from a random 100-dimensional latent vector z ~ N(0, I). Latent vector z does not learn; fresh noise is sampled for every batch.</span>
+                </div>
+            </div>
+
+            <!-- Complete DCGAN Interactive Flow Diagram -->
+            <div class="dcgan-flow-container">
+                <div class="flow-branches-container">
+                    <!-- Branch 1: Generated Image Path -->
+                    <div class="flow-branch flow-branch-generator">
+                        <div class="branch-label">Synthetic Generation Path</div>
+                        <div class="flow-node" id="node-noise" data-step="1">
+                            <div class="node-title">Random Latent Noise</div>
+                            <div class="node-desc">Gaussian distribution N(0, I)</div>
+                        </div>
+                        <div class="flow-arrow-down">↓</div>
+                        <div class="flow-node" id="node-latent-z" data-step="1">
+                            <div class="node-title">100-dimensional latent vector z</div>
+                            <div class="node-desc">Sampled seed vector (non-trainable)</div>
+                        </div>
+                        <div class="flow-arrow-down">↓</div>
+                        <div class="flow-node" id="node-generator" data-step="2">
+                            <div class="node-title">Generator</div>
+                            <div class="node-desc">ConvTranspose2d upsampling layers</div>
+                        </div>
+                        <div class="flow-arrow-down">↓</div>
+                        <div class="flow-node" id="node-gen-image" data-step="2">
+                            <div class="node-title">Generated 28×28 Fashion Image</div>
+                            <div class="node-desc">Synthetic output G(z)</div>
+                        </div>
+                    </div>
+
+                    <!-- Flow Merge Indicator -->
+                    <div class="flow-merge-connector">
+                        <div class="merge-arrow-left">↘</div>
+                        <div class="merge-tag">Feeds into D</div>
+                        <div class="merge-arrow-right">↙</div>
+                    </div>
+
+                    <!-- Branch 2: Real Image Path -->
+                    <div class="flow-branch flow-branch-real">
+                        <div class="branch-label">Ground Truth Path</div>
+                        <div class="flow-node flow-node-real" id="node-real-image" data-step="3">
+                            <div class="node-title">Fashion-MNIST Real Image</div>
+                            <div class="node-desc">28×28 grayscale training sample x</div>
+                        </div>
+                        <div class="flow-arrow-down">↓</div>
+                        <div class="real-path-connector-desc">
+                            <span>Direct input to Discriminator</span>
+                            <span class="real-target-badge">Target = 1 (Real)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Downstream Adversarial Evaluation & Training Loop -->
+                <div class="flow-downstream-container">
+                    <div class="flow-arrow-down flow-arrow-accent">↓</div>
+
+                    <div class="flow-node" id="node-discriminator" data-step="3">
+                        <div class="node-title">Discriminator</div>
+                        <div class="node-desc">Conv2d binary classifier (judges Real vs. Fake)</div>
+                        <div class="node-subpills">
+                            <span class="subpill pill-d">D Target: Real=1, Fake=0</span>
+                            <span class="subpill pill-g">G Target: Wants Fake classified as 1</span>
+                        </div>
+                    </div>
+
+                    <div class="flow-arrow-down">↓</div>
+
+                    <div class="flow-node" id="node-prediction" data-step="3">
+                        <div class="node-title">Real / Fake prediction</div>
+                        <div class="node-desc">Authenticity probability output D(x) &amp; D(G(z)) in [0, 1]</div>
+                    </div>
+
+                    <div class="flow-arrow-down">↓</div>
+
+                    <div class="flow-node" id="node-loss" data-step="4">
+                        <div class="node-title">BCE Loss</div>
+                        <div class="node-desc">Binary Cross Entropy measures prediction error for both networks</div>
+                    </div>
+
+                    <div class="flow-arrow-down">↓</div>
+
+                    <div class="flow-node" id="node-gradients" data-step="4">
+                        <div class="node-title">Gradients</div>
+                        <div class="node-desc">Backpropagation computes parameter gradients (∂Loss/∂θ)</div>
+                    </div>
+
+                    <div class="flow-arrow-down">↓</div>
+
+                    <div class="flow-node" id="node-weights" data-step="5">
+                        <div class="node-title">Adam updates Generator/Discriminator weights</div>
+                        <div class="node-desc">Model parameters θ_G and θ_D updated (lr=0.0002, β1=0.5)</div>
+                    </div>
+
+                    <div class="flow-arrow-down">↓</div>
+
+                    <div class="flow-node flow-node-loop" id="node-loop" data-step="5">
+                        <div class="node-title">Next batch ➔ Repeat</div>
+                        <div class="node-desc">Process repeats for every batch and epoch</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Important Concept Visual Callout for Viva -->
+            <div class="dcgan-viva-callout">
+                <div class="viva-callout-header">
+                    <span class="viva-icon">💡</span>
+                    <strong class="viva-title">Key Conceptual Distinction:</strong>
+                </div>
+                <div class="viva-callout-body">
+                    <div class="viva-item viva-random">
+                        <div class="viva-item-label">Input that stays random:</div>
+                        <div class="viva-item-val"><code>z</code></div>
+                        <div class="viva-item-sub">100-dimensional latent vector sampled anew each batch</div>
+                    </div>
+                    <div class="viva-divider">⚡</div>
+                    <div class="viva-item viva-learn">
+                        <div class="viva-item-label">Parameters that learn:</div>
+                        <div class="viva-item-val"><code>Generator/Discriminator weights</code></div>
+                        <div class="viva-item-sub">Convolutional kernel weights and biases updated via Adam</div>
+                    </div>
+                </div>
+                <div class="viva-callout-footer">
+                    <strong>Viva Note:</strong> The latent vector itself is <em>NOT</em> what learns. The Generator and Discriminator weights are what learn across training batches and epochs.
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <p>Built with Python • PyTorch • Torchvision • Flask • Fashion-MNIST | Final Model: 50-Epoch DCGAN</p>
+    </footer>
+
+    <!-- Interactive JavaScript -->
+    <script>
+        async function generateFashion() {
+            const btn = document.getElementById("generate-btn");
+            const statusText = document.getElementById("status-text");
+            const img = document.getElementById("generated-grid-img");
+            const summaryBanner = document.getElementById("predictions-summary-banner");
+            const perImageContainer = document.getElementById("per-image-container");
+            const perImageGrid = document.getElementById("per-image-cards-grid");
+
+            btn.disabled = true;
+            btn.innerHTML = '⌛ Generating & Evaluating...';
+            if (statusText) statusText.innerText = "Running Generator & Discriminator inference on GPU...";
+
+            try {
+                const response = await fetch("/api/generate", { method: "POST" });
+                const data = await response.json();
+
+                if (data.status === "success") {
+                    img.src = data.image_url;
+                    if (statusText) statusText.innerText = `Generated 16 fresh synthetic samples & computed per-image Discriminator scores (${data.device.toUpperCase()}).`;
+
+                    // Update Batch Summary
+                    document.getElementById("stat-real-count").innerText = `${data.summary.predicted_real_count} / 16`;
+                    document.getElementById("stat-fake-count").innerText = `${data.summary.predicted_fake_count} / 16`;
+                    document.getElementById("stat-avg-prob").innerText = `${data.summary.average_real_probability_percent}%`;
+                    summaryBanner.style.display = "flex";
+
+                    // Render 16 Individual Item Cards
+                    perImageGrid.innerHTML = "";
+                    data.predictions.forEach(item => {
+                        const card = document.createElement("div");
+                        card.className = "per-image-item-card";
+
+                        const pillClass = item.is_real ? "pred-real" : "pred-fake";
+                        const meterClass = item.is_real ? "prob-meter-fill-real" : "prob-meter-fill-fake";
+
+                        card.innerHTML = `
+                            <div class="item-header">Item #${item.index}</div>
+                            <img class="item-thumb" src="${item.image_data}" alt="Item #${item.index}">
+                            <div class="pred-pill ${pillClass}">${item.label} (${item.percentage}%)</div>
+                            <div class="prob-meter-bg">
+                                <div class="prob-meter-fill ${meterClass}" style="width: ${item.percentage}%;"></div>
+                            </div>
+                        `;
+                        perImageGrid.appendChild(card);
+                    });
+
+                    perImageContainer.style.display = "block";
+                } else {
+                    alert("Generation error: " + (data.message || "Unknown error"));
+                    if (statusText) statusText.innerText = "Error generating samples.";
+                }
+            } catch (err) {
+                console.error("Fetch error:", err);
+                alert("Failed to connect to backend server.");
+                if (statusText) statusText.innerText = "Server connection failed.";
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '⚡ Generate Fashion';
+            }
+        }
+
+        /* ----------------------------------------------------
+           Interactive Stepper: How DCGAN Works Flow Walkthrough
+           ---------------------------------------------------- */
+        const dcganStages = [
+            {
+                num: 1,
+                title: "Sample Random Noise",
+                explanation: "A random 100-dimensional latent vector z is sampled.",
+                note: "Each generated image begins from a random 100-dimensional Gaussian vector z ~ N(0, I). Latent vector z does not learn; fresh noise is drawn for every generated image.",
+                activeNodeIds: ["node-noise", "node-latent-z"]
+            },
+            {
+                num: 2,
+                title: "Generator Creates Image",
+                explanation: "The Generator transforms z into a 28×28 synthetic fashion image.",
+                note: "The Generator uses ConvTranspose2d upsampling layers with BatchNorm2d and ReLU (Tanh at output) to reshape the 100-D vector into a realistic 28×28 grayscale garment.",
+                activeNodeIds: ["node-generator", "node-gen-image"]
+            },
+            {
+                num: 3,
+                title: "Discriminator Judges",
+                explanation: "The Discriminator receives real and generated images and predicts whether each is real or fake.",
+                note: "The Discriminator receives both real Fashion-MNIST images and generated synthetic images. During Discriminator training: real target = 1, fake target = 0. During Generator training: Generator target = 1 (aims to fool D into predicting fake images as real).",
+                activeNodeIds: ["node-real-image", "node-discriminator", "node-prediction"]
+            },
+            {
+                num: 4,
+                title: "Calculate Loss",
+                explanation: "Binary Cross Entropy measures prediction error. Gradients indicate how model parameters should change.",
+                note: "Binary Cross Entropy (BCE) loss quantifies classification errors for D and adversarial objectives for G. Backpropagation calculates parameter gradients (∂Loss/∂θ) throughout all layers.",
+                activeNodeIds: ["node-loss", "node-gradients"]
+            },
+            {
+                num: 5,
+                title: "Update Weights",
+                explanation: "Adam updates the Generator and Discriminator weights. New batches then continue the learning process.",
+                note: "Adam optimizer (lr=0.0002, β1=0.5) updates Generator and Discriminator weights. The latent vector z itself is NOT what learns; neural network weights learn. The process repeats across all batches and epochs.",
+                activeNodeIds: ["node-weights", "node-loop"]
+            }
+        ];
+
+        let currentStepIndex = 0;
+
+        function updateStepView() {
+            const stage = dcganStages[currentStepIndex];
+
+            // 1. Update text & badges
+            const badge = document.getElementById("stage-badge");
+            const title = document.getElementById("stage-title");
+            const explanation = document.getElementById("stage-explanation");
+            const noteText = document.getElementById("stage-note-text");
+
+            if (badge) badge.innerText = `Step ${stage.num} of 5`;
+            if (title) title.innerText = stage.title;
+            if (explanation) explanation.innerText = stage.explanation;
+            if (noteText) noteText.innerText = stage.note;
+
+            // 2. Update navigation button states
+            const prevBtn = document.getElementById("step-prev-btn");
+            const nextBtn = document.getElementById("step-next-btn");
+            if (prevBtn) prevBtn.disabled = (currentStepIndex === 0);
+            if (nextBtn) nextBtn.disabled = (currentStepIndex === dcganStages.length - 1);
+
+            // 3. Update step pills
+            const pills = document.querySelectorAll(".step-pill");
+            pills.forEach((pill, idx) => {
+                if (idx === currentStepIndex) {
+                    pill.classList.add("active");
+                } else {
+                    pill.classList.remove("active");
+                }
+            });
+
+            // 4. Highlight active flow diagram nodes
+            document.querySelectorAll(".flow-node").forEach(node => {
+                node.classList.remove("active");
+            });
+
+            stage.activeNodeIds.forEach(id => {
+                const nodeEl = document.getElementById(id);
+                if (nodeEl) nodeEl.classList.add("active");
+            });
+        }
+
+        function nextStep() {
+            if (currentStepIndex < dcganStages.length - 1) {
+                currentStepIndex++;
+                updateStepView();
+            }
+        }
+
+        function prevStep() {
+            if (currentStepIndex > 0) {
+                currentStepIndex--;
+                updateStepView();
+            }
+        }
+
+        function jumpToStep(idx) {
+            if (idx >= 0 && idx < dcganStages.length) {
+                currentStepIndex = idx;
+                updateStepView();
+            }
+        }
+
+        // Initialize step view on load
+        document.addEventListener("DOMContentLoaded", () => {
+            updateStepView();
+        });
+    </script>
+
+</body>
+</html>
